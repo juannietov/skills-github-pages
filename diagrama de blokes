@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diagrama de Bloques Interactivo</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; overflow: hidden; background: #fafafa; }
+    #diagram-container { width: 100vw; height: 100vh; overflow: hidden; position: relative; }
+    #viewport { transform-origin: 0 0; }
++    #diagram { position: relative; width: max-content; height: max-content; }
++    #diagram svg { position: absolute; top: 0; left: 0; } { width: 100vw; height: 100vh; overflow: hidden; position: relative; }
+    #viewport { transform-origin: 0 0; }
+    .block {
+      position: absolute;
+      width: 180px;
+      height: 100px;
+      background: #fff;
+      border: 2px solid #444;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      transition: transform 0.2s, background 0.3s, border-color 0.3s;
+    }
+    .block:hover { transform: scale(1.05); }
+    .block.active { background: #fee; border-color: #e74c3c; box-shadow: 0 0 12px #e74c3c; }
+    .tooltip {
+      position: absolute;
+      padding: 6px 10px;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    #infoBox {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 250px;
+      background: #fff;
+      border: 1px solid #444;
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    #controls {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+    }
+    #controls button {
+      padding: 10px 14px;
+      font-size: 15px;
+      border: none;
+      border-radius: 4px;
+      background: #444;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #controls button:hover { background: #666; }
+    svg { position: absolute; top: 0; left: 0; width:100%; height:100%; pointer-events: none; }
+    .arrow { stroke: #666; stroke-width: 3; fill: none; marker-end: url(#arrowhead); transition: stroke 0.3s; }
+    .arrow.highlight { stroke: #e74c3c; stroke-width: 4; filter: drop-shadow(0 0 6px #e74c3c); }
+  </style>
+</head>
+<body>
+  <div id="diagram-container">
+    <div id="viewport">
+      <div id="diagram">
+        <div class="block" id="block-audio" style="top: 40px; left: 50px;">Fuente de Audio<br/>(Teléfono)</div>
+        <div class="block" id="block-txamp" style="top: 180px; left: 50px;">Amplificador TX<br/>Transistor S8050 + 100Ω</div>
+        <div class="block" id="block-mod" style="top: 320px; left: 50px;">Modulador<br/>LED Infrarrojo</div>
+        <div class="block" id="block-photodet" style="top: 320px; left: 350px;">Fototransistor</div>
+        <div class="block" id="block-lm386" style="top: 180px; left: 350px;">Amplificador RX<br/>LM386 + demodulación</div>
+        <div class="block" id="block-speaker" style="top: 40px; left: 350px;">Altavoz</div>
+        <svg>
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+            </marker>
+          </defs>
+          <line id="arrow1" class="arrow" x1="140" y1="140" x2="140" y2="180" />
+          <line id="arrow2" class="arrow" x1="140" y1="280" x2="140" y2="320" />
+          <line id="arrow3" class="arrow" x1="230" y1="370" x2="350" y2="370" />
+          <line id="arrow4" class="arrow" x1="350" y1="320" x2="350" y2="280" />
+          <line id="arrow5" class="arrow" x1="350" y1="180" x2="350" y2="140" />
+        </svg>
+      </div>
+    </div>
+    <div id="tooltip" class="tooltip"></div>
+    <div id="infoBox"><strong>Descripción:</strong><br/>Haz clic en un bloque para ver detalles.</div>
+    <div id="controls">
+      <button id="playBtn">▶️ Reproducir Flujo</button>
+      <button id="resetBtn">🔄 Reiniciar</button>
+      <button id="zoomIn">➕ Zoom+</button>
+      <button id="zoomOut">➖ Zoom-</button>
+      <button id="resetView">🔄 Vista</button>
+    </div>
+  </div>
+  <script>
+    const descriptions = {
+      "block-audio": "La fuente de audio (celular, micrófono) genera la señal original.",
+      "block-txamp": "Amplifica la señal con transistor S8050 y resistencia de 100Ω.",
+      "block-mod": "Transforma la señal eléctrica en luz infrarroja, una onda electromagnética compuesta por campos eléctricos y magnéticos oscilantes. Según la Ley de Faraday, estas ondas permiten la propagación de la energía y la información.",
+      "block-photodet": "El fototransistor detecta la luz infrarroja (onda electromagnética) y la convierte nuevamente en señal eléctrica. Esta conversión aprovecha las propiedades de interacción de las ondas electromagnéticas con materiales semiconductores, dentro del marco de la Ley de Faraday.",
+      "block-lm386": "El LM386 demodula y amplifica la señal para el altavoz, manteniendo la información contenida en la onda electromagnética inicial generada según la Ley de Faraday.",
+      "block-speaker": "Convierte la señal eléctrica amplificada en sonido audible. La Ley de Faraday se manifiesta cuando el campo magnético generado en la bobina interactúa con un imán permanente, moviendo el cono del altavoz para producir sonido."
+    };
+
+    const tooltip = document.getElementById('tooltip');
+    document.querySelectorAll('.block').forEach(block => {
+      block.addEventListener('mouseenter', e => {
+        tooltip.textContent = descriptions[block.id];
+        tooltip.style.left = e.pageX + 12 + 'px';
+        tooltip.style.top = e.pageY + 12 + 'px';
+        tooltip.style.opacity = 1;
+      });
+      block.addEventListener('mousemove', e => {
+        tooltip.style.left = e.pageX + 12 + 'px';
+        tooltip.style.top = e.pageY + 12 + 'px';
+      });
+      block.addEventListener('mouseleave', () => { tooltip.style.opacity = 0; });
+      block.addEventListener('click', () => {
+        document.getElementById('infoBox').innerHTML = `<strong>${block.textContent}</strong><br/>` + descriptions[block.id];
+        document.querySelectorAll('.block').forEach(b => b.classList.remove('active'));
+        block.classList.add('active');
+      });
+    });
+
+    const arrows = ['arrow1','arrow2','arrow3','arrow4','arrow5'].map(id => document.getElementById(id));
+    const blocks = ['block-audio','block-txamp','block-mod','block-photodet','block-lm386','block-speaker'];
+    let idx = 0, anim;
+    function step() {
+      if (idx > 0 && idx <= arrows.length) {
+        arrows[idx-1]?.classList.remove('highlight');
+        document.getElementById(blocks[idx-1])?.classList.remove('active');
+      }
+      if (idx < arrows.length) {
+        arrows[idx]?.classList.add('highlight');
+        document.getElementById(blocks[idx])?.classList.add('active');
+        idx++;
+      } else if (idx === arrows.length) {
+        document.getElementById(blocks[idx])?.classList.add('active');
+        idx++;
+      } else {
+        clearInterval(anim);
+      }
+    }
+    document.getElementById('playBtn').onclick = () => {
+      clearInterval(anim);
+      arrows.forEach(a => a?.classList.remove('highlight'));
+      document.querySelectorAll('.block').forEach(b => b.classList.remove('active'));
+      idx = 0;
+      anim = setInterval(step, 700);
+    };
+    document.getElementById('resetBtn').onclick = () => {
+      clearInterval(anim);
+      arrows.forEach(a => a?.classList.remove('highlight'));
+      document.querySelectorAll('.block').forEach(b => b.classList.remove('active'));
+      idx = 0;
+    };
+
+    const viewport = document.getElementById('viewport');
+    let scale=1, originX=0, originY=0;
+    document.getElementById('zoomIn').onclick = () => { scale*=1.2; updateTransform(); };
+    document.getElementById('zoomOut').onclick = () => { scale/=1.2; updateTransform(); };
+    document.getElementById('resetView').onclick = () => { scale=1; originX=0; originY=0; updateTransform(); };
+    function updateTransform() { viewport.style.transform = `translate(${originX}px,${originY}px) scale(${scale})`; }
+    let dragging=false, startX, startY;
+    document.getElementById('diagram-container').addEventListener('mousedown', e => { dragging=true; startX=e.clientX-originX; startY=e.clientY-originY; });
+    document.addEventListener('mousemove', e => { if(!dragging) return; originX=e.clientX-startX; originY=e.clientY-startY; updateTransform(); });
+    document.addEventListener('mouseup', () => { dragging=false; });
+  </script>
+</body>
+</html>
