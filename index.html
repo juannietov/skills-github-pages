@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulación Mecanismo de Hundimiento - UTP</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        /* UI Overlay Container */
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Permite clicks a través en áreas vacías */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Header - Minimalista y menos intrusivo */
+        #header {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 100%;
+            padding: 20px 40px;
+            box-sizing: border-box;
+            text-align: right;
+            background: linear-gradient(to bottom, rgba(10, 20, 30, 0.8) 0%, transparent 100%);
+            pointer-events: none;
+            z-index: 10;
+        }
+        h1 { 
+            margin: 0; 
+            font-size: 1.8rem; 
+            letter-spacing: 2px; 
+            color: #00e5ff; 
+            text-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+            font-weight: 300;
+        }
+        .subtitle { font-size: 0.9rem; color: #80deea; margin-top: 5px; font-weight: 400; opacity: 0.8; }
+        .paper-ref { 
+            font-size: 0.75rem; 
+            font-style: italic; 
+            color: #b2ebf2; 
+            opacity: 0.6;
+            margin-top: 5px; 
+        }
+
+        /* Dashboard Telemetry - Estilo Glassmorphism Colapsable */
+        #dashboard {
+            position: absolute;
+            top: 120px;
+            left: 30px;
+            width: 260px;
+            background: rgba(12, 28, 40, 0.65); /* Un poco más oscuro para consistencia */
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-left: 2px solid rgba(0, 229, 255, 0.6);
+            border-top: 1px solid rgba(0, 229, 255, 0.2);
+            border-radius: 4px;
+            padding: 0; /* Padding movido a los hijos para colapsar limpiamente */
+            color: #e0f7fa;
+            font-family: 'Consolas', 'Monaco', monospace;
+            pointer-events: auto; 
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+            transition: max-height 0.4s ease, background-color 0.3s;
+            overflow: hidden;
+            max-height: 400px; /* Altura máxima esperada cuando está abierto */
+        }
+        
+        /* Estado Colapsado */
+        #dashboard.collapsed {
+            max-height: 46px; /* Altura solo del título */
+            background: rgba(5, 15, 25, 0.9); /* Más opaco cuando está cerrado */
+            border-left: 2px solid rgba(0, 229, 255, 0.3);
+        }
+        
+        #dashboard:hover {
+            background: rgba(12, 28, 40, 0.8);
+            border-left: 2px solid rgba(0, 229, 255, 1);
+        }
+
+        .dash-title {
+            font-size: 0.9rem;
+            color: #00bcd4;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid rgba(0, 188, 212, 0.3);
+            padding: 15px 20px;
+            margin-bottom: 0;
+            cursor: pointer; /* Indica que es clicable */
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+        }
+        
+        .dash-title:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #00e5ff;
+        }
+
+        .toggle-icon {
+            font-weight: bold;
+            font-size: 1.1rem;
+            transition: transform 0.3s;
+        }
+
+        /* Contenedor interno para el contenido que se oculta */
+        #dash-content {
+            padding: 0 20px 20px 20px;
+            padding-top: 10px;
+        }
+        
+        .metric { 
+            margin-bottom: 8px; 
+            display: flex; 
+            justify-content: space-between; 
+            font-size: 0.85rem;
+        }
+        .metric label { color: #b2ebf2; opacity: 0.8; }
+        .metric span { color: #fff; font-weight: bold; text-shadow: 0 0 5px rgba(0,0,0,0.5); }
+        
+        .alert-box {
+            margin-top: 15px;
+            padding: 8px;
+            background: rgba(255, 23, 68, 0.2);
+            border: 1px solid #ff1744;
+            color: #ff1744;
+            text-align: center;
+            font-weight: bold;
+            font-size: 0.8rem;
+            display: none;
+            animation: pulseAlert 1s infinite;
+            border-radius: 2px;
+            letter-spacing: 1px;
+        }
+
+        @keyframes pulseAlert { 0% { opacity: 0.6; } 100% { opacity: 1; } 100% { opacity: 0.5; } }
+
+        /* Contenedor para el panel de control (Lil-GUI) */
+        #controls-container {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            z-index: 100;
+            pointer-events: auto; 
+        }
+        
+        /* Personalización de ALTO CONTRASTE para lil-gui */
+        .lil-gui { 
+            --background-color: rgba(5, 15, 25, 0.95); /* Fondo casi negro para máximo contraste */
+            --text-color: #ffffff; /* Texto blanco puro */
+            --title-background-color: #004d40; /* Título oscuro y sobrio */
+            --widget-color: #444; /* Fondo de widgets oscuro */
+            --hover-color: #555;
+            --focus-color: #00e5ff; /* Acento cian al interactuar */
+            --number-color: #00e5ff;
+            --string-color: #00e5ff;
+            
+            border: 1px solid rgba(0, 229, 255, 0.3); /* Borde sutil para definir el panel */
+            border-radius: 4px;
+            box-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.7); /* Sombra fuerte para separar del fondo */
+            backdrop-filter: blur(10px);
+        }
+        
+        .lil-gui .slider { background-color: #222; }
+        .lil-gui .slider-fg { background-color: #00bcd4; }
+
+        /* Footer discreto */
+        #footer {
+            position: absolute;
+            bottom: 10px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 0.7rem;
+            pointer-events: none;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00e5ff;
+            font-size: 1.5rem;
+            font-family: sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            animation: fadePulse 1.5s infinite;
+        }
+        @keyframes fadePulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+    </style>
+    <!-- Import Three.js as ES Modules -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="loading">Sistemas Online...</div>
+
+    <!-- UI Layer -->
+    <div id="ui-container">
+        <div id="header">
+            <h1>MECANISMO DE HUNDIMIENTO</h1>
+            <div class="subtitle">Laboratorio Virtual de Física I - UTP</div>
+            <div class="paper-ref">
+                Juan Nieto, Santiago Valencia, Juan Campos, Marlon Buitrago (2025)
+            </div>
+        </div>
+
+        <div id="dashboard">
+            <div class="dash-title" id="dash-toggle">
+                Telemetría
+                <span class="toggle-icon">−</span>
+            </div>
+            <div id="dash-content">
+                <div class="metric"><label>Profundidad (h):</label> <span id="disp-depth">0.0 m</span></div>
+                <div class="metric"><label>Presión Ext:</label> <span id="disp-pressure">1.00 atm</span></div>
+                <div class="metric"><label>Volumen Casco:</label> <span id="disp-volume">100%</span></div>
+                <div class="metric"><label>Densidad Sub:</label> <span id="disp-density">1000 kg/m³</span></div>
+                <div class="metric"><label>Estado:</label> <span id="disp-status" style="color: #00e676;">NEUTRO</span></div>
+                <div id="alert-implosion" class="alert-box">⚠ RIESGO DE IMPLOSIÓN</div>
+            </div>
+        </div>
+
+        <!-- Contenedor específico para controles -->
+        <div id="controls-container"></div>
+
+        <div id="footer">
+            Interactuar: Click Izq (Rotar) | Click Der (Mover) | Rueda (Zoom)
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+        // --- CONSTANTES FÍSICAS ---
+        const G = 9.81; 
+        const RHO_AGUA = 1025; 
+        const P_ATM = 101325; 
+        
+        // Parámetros del Submarino
+        const SUB_LENGTH = 13; 
+        const SUB_RADIUS = 1.5; 
+        const BASE_VOLUME = Math.PI * Math.pow(SUB_RADIUS, 2) * (SUB_LENGTH - 2) + (4/3)*Math.PI*Math.pow(SUB_RADIUS,3); 
+        const BASE_MASS = BASE_VOLUME * RHO_AGUA * 0.90; 
+        const MAX_BALLAST_MASS = BASE_VOLUME * RHO_AGUA * 0.30; 
+        
+        const HULL_COMPRESSION_FACTOR = 0.00015; 
+
+        // --- VARIABLES DE ESTADO ---
+        const state = {
+            depth: 0,       
+            velocity: 0,    
+            ballastLevel: 0, 
+            hullVolume: BASE_VOLUME,
+            isImploded: false,
+            lastBallastLevel: 0
+        };
+
+        // --- ESCENA THREE.JS ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1b2631); 
+        scene.fog = new THREE.Fog(0x1b2631, 20, 120);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // Función para ajustar cámara inicial según dispositivo
+        function setInitialCamera() {
+            if (window.innerWidth < 768) {
+                // Móvil (Retrato): Alejar cámara para ver todo el sub
+                camera.position.set(35, 8, 10); 
+            } else {
+                // Escritorio
+                camera.position.set(26, 6, 5);
+            }
+        }
+        setInitialCamera();
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.target.set(0, 0, 0);
+
+        // --- ILUMINACIÓN ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); 
+        scene.add(ambientLight);
+
+        const hemiLight = new THREE.HemisphereLight(0x445566, 0x000000, 0.6);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(10, 50, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        const spotLight = new THREE.SpotLight(0xffffff, 8, 70, 0.4, 0.2, 1);
+        scene.add(spotLight);
+
+        // --- ENTORNO ---
+        const waterGeo = new THREE.PlaneGeometry(2000, 2000);
+        const waterMat = new THREE.MeshStandardMaterial({ 
+            color: 0x00ffff, 
+            transparent: true, 
+            opacity: 0.45, 
+            side: THREE.DoubleSide,
+            roughness: 0.0,
+            metalness: 0.3,
+            emissive: 0x004455,
+            emissiveIntensity: 0.2
+        });
+        const seaSurface = new THREE.Mesh(waterGeo, waterMat);
+        seaSurface.rotation.x = -Math.PI / 2;
+        scene.add(seaSurface);
+
+        const seaBedGeo = new THREE.PlaneGeometry(2000, 2000, 64, 64);
+        const pos = seaBedGeo.attributes.position;
+        for(let i=0; i < pos.count; i++){
+            pos.setZ(i, Math.random() * 8);
+        }
+        const seaBedMat = new THREE.MeshStandardMaterial({ 
+            color: 0x0a1a2a, 
+            roughness: 0.9 
+        });
+        const seaBed = new THREE.Mesh(seaBedGeo, seaBedMat);
+        seaBed.rotation.x = -Math.PI / 2;
+        seaBed.position.y = -600; 
+        scene.add(seaBed);
+        
+        const gridHelper = new THREE.GridHelper(100, 20, 0x00ffff, 0x004444);
+        gridHelper.position.y = 0.1;
+        gridHelper.material.opacity = 0.2;
+        gridHelper.material.transparent = true;
+        scene.add(gridHelper);
+
+        // --- CONSTRUCCIÓN DEL SUBMARINO ---
+        const subGroup = new THREE.Group();
+        scene.add(subGroup);
+
+        const hullMat = new THREE.MeshPhysicalMaterial({
+            color: 0xd0d0d0, 
+            metalness: 0.3,
+            roughness: 0.1,
+            transmission: 0.2, 
+            thickness: 1.5,
+            transparent: true,
+            opacity: 0.75, 
+            side: THREE.DoubleSide,
+            clearcoat: 1.0
+        });
+
+        const steelDarkMat = new THREE.MeshStandardMaterial({ 
+            color: 0x37474f, 
+            metalness: 0.7, 
+            roughness: 0.4 
+        });
+
+        const detailMat = new THREE.MeshStandardMaterial({
+            color: 0xcfd8dc, 
+            metalness: 0.7,
+            roughness: 0.3
+        });
+
+        const hullCylLen = SUB_LENGTH - (SUB_RADIUS * 2); 
+        const mainHullGeo = new THREE.CylinderGeometry(SUB_RADIUS, SUB_RADIUS, hullCylLen, 32);
+        const mainHull = new THREE.Mesh(mainHullGeo, hullMat);
+        mainHull.rotation.x = Math.PI / 2; 
+        subGroup.add(mainHull);
+
+        const ribGeo = new THREE.TorusGeometry(SUB_RADIUS * 0.95, 0.05, 16, 48);
+        const numRibs = 6;
+        for(let i=0; i<numRibs; i++) {
+            const rib = new THREE.Mesh(ribGeo, detailMat);
+            const zPos = -hullCylLen/2 + (hullCylLen / (numRibs-1)) * i;
+            rib.position.z = zPos; 
+            subGroup.add(rib);
+        }
+
+        const noseGeo = new THREE.SphereGeometry(SUB_RADIUS, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+        const nose = new THREE.Mesh(noseGeo, steelDarkMat);
+        nose.rotation.x = -Math.PI / 2; 
+        nose.position.z = hullCylLen / 2; 
+        subGroup.add(nose); 
+
+        const tailLen = SUB_RADIUS * 2;
+        const tailGeo = new THREE.CylinderGeometry(SUB_RADIUS, SUB_RADIUS * 0.3, tailLen, 32);
+        const tail = new THREE.Mesh(tailGeo, steelDarkMat);
+        tail.rotation.x = -Math.PI / 2; 
+        tail.position.z = -(hullCylLen / 2 + tailLen / 2); 
+        subGroup.add(tail);
+
+        const finGeo = new THREE.BoxGeometry(1.5, 0.1, 1.5);
+        const finTop = new THREE.Mesh(finGeo, steelDarkMat);
+        finTop.rotation.z = Math.PI / 2;
+        finTop.position.set(0, SUB_RADIUS, 0);
+        tail.add(finTop);
+
+        const finBot = new THREE.Mesh(finGeo, steelDarkMat);
+        finBot.rotation.z = Math.PI / 2;
+        finBot.position.set(0, -SUB_RADIUS, 0);
+        tail.add(finBot);
+
+        const finLeft = new THREE.Mesh(finGeo, steelDarkMat);
+        finLeft.position.set(SUB_RADIUS, 0, 0);
+        tail.add(finLeft);
+
+        const finRight = new THREE.Mesh(finGeo, steelDarkMat);
+        finRight.position.set(-SUB_RADIUS, 0, 0);
+        tail.add(finRight);
+
+        const sailGeo = new THREE.BoxGeometry(SUB_RADIUS * 0.8, SUB_RADIUS * 1.5, SUB_RADIUS * 1.2);
+        const sail = new THREE.Mesh(sailGeo, steelDarkMat);
+        sail.position.y = SUB_RADIUS * 0.8; 
+        sail.position.z = hullCylLen * 0.2; 
+        subGroup.add(sail);
+
+        const divePlaneGeo = new THREE.BoxGeometry(1.2, 0.1, 0.6);
+        const divePlaneLeft = new THREE.Mesh(divePlaneGeo, steelDarkMat);
+        divePlaneLeft.position.set(0.6, 0, 0);
+        sail.add(divePlaneLeft);
+        
+        const divePlaneRight = new THREE.Mesh(divePlaneGeo, steelDarkMat);
+        divePlaneRight.position.set(-0.6, 0, 0);
+        sail.add(divePlaneRight);
+
+        const periscopeGroup = new THREE.Group();
+        periscopeGroup.position.y = SUB_RADIUS * 0.75;
+        sail.add(periscopeGroup);
+
+        const mastGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.2);
+        const mast1 = new THREE.Mesh(mastGeo, detailMat);
+        mast1.position.x = 0.2;
+        periscopeGroup.add(mast1);
+        
+        const mast2 = new THREE.Mesh(mastGeo, detailMat);
+        mast2.scale.y = 0.7;
+        mast2.position.x = -0.2;
+        periscopeGroup.add(mast2);
+
+        const propGroup = new THREE.Group();
+        propGroup.position.y = -tailLen / 2; 
+        tail.add(propGroup); 
+
+        const propHubGeo = new THREE.ConeGeometry(0.15, 0.4, 16);
+        const propHub = new THREE.Mesh(propHubGeo, detailMat);
+        propHub.rotation.x = Math.PI; 
+        propGroup.add(propHub);
+
+        const bladeGeo = new THREE.BoxGeometry(0.8, 0.1, 0.15);
+        for(let i=0; i<5; i++) { 
+            const blade = new THREE.Mesh(bladeGeo, detailMat);
+            blade.rotation.y = (Math.PI * 2 / 5) * i; 
+            blade.rotateX(0.3);
+            propGroup.add(blade);
+        }
+
+        const tankVisGeo = new THREE.CylinderGeometry(SUB_RADIUS*0.6, SUB_RADIUS*0.6, hullCylLen*0.3, 16);
+        const tankShellMat = new THREE.MeshBasicMaterial({ 
+            color: 0x000000, 
+            wireframe: true, 
+            transparent: true, 
+            opacity: 0.2 
+        }); 
+        
+        const tankFrontVis = new THREE.Mesh(tankVisGeo, tankShellMat);
+        tankFrontVis.rotation.x = Math.PI / 2; 
+        tankFrontVis.position.z = hullCylLen * 0.25;
+        subGroup.add(tankFrontVis);
+
+        const tankBackVis = new THREE.Mesh(tankVisGeo, tankShellMat);
+        tankBackVis.rotation.x = Math.PI / 2;
+        tankBackVis.position.z = -hullCylLen * 0.25;
+        subGroup.add(tankBackVis);
+
+        const waterLevelGeo = new THREE.CylinderGeometry(SUB_RADIUS*0.58, SUB_RADIUS*0.58, hullCylLen*0.28, 16);
+        const waterFillMat = new THREE.MeshBasicMaterial({ 
+            color: 0x00bfff, 
+            opacity: 0.9, 
+            transparent: true,
+            side: THREE.DoubleSide
+        }); 
+        
+        const waterFrontMesh = new THREE.Mesh(waterLevelGeo, waterFillMat);
+        waterFrontMesh.rotation.x = Math.PI / 2; 
+        waterFrontMesh.position.z = hullCylLen * 0.25;
+        waterFrontMesh.scale.set(1, 1, 0.01); 
+        subGroup.add(waterFrontMesh);
+
+        const waterBackMesh = new THREE.Mesh(waterLevelGeo, waterFillMat);
+        waterBackMesh.rotation.x = Math.PI / 2;
+        waterBackMesh.position.z = -hullCylLen * 0.25;
+        waterBackMesh.scale.set(1, 1, 0.01); 
+        subGroup.add(waterBackMesh);
+
+        // Jet
+        const jetCount = 2000;
+        const jetGeo = new THREE.BufferGeometry();
+        const jetPos = new Float32Array(jetCount * 3);
+        const jetVel = new Float32Array(jetCount); 
+        
+        for(let i=0; i<jetCount; i++) jetPos[i*3+1] = -1000; 
+        jetGeo.setAttribute('position', new THREE.BufferAttribute(jetPos, 3));
+        
+        const jetMat = new THREE.PointsMaterial({ 
+            color: 0x4fc3f7, 
+            size: 0.15, 
+            transparent: true, 
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending 
+        });
+        const jetSystem = new THREE.Points(jetGeo, jetMat);
+        subGroup.add(jetSystem);
+
+        // Agitación
+        const agitationCount = 1000;
+        const agitationGeo = new THREE.BufferGeometry();
+        const agitationPos = new Float32Array(agitationCount * 3);
+        for(let i=0; i<agitationCount; i++) agitationPos[i*3+1] = -1000;
+        agitationGeo.setAttribute('position', new THREE.BufferAttribute(agitationPos, 3));
+
+        const agitationMat = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 0.12,
+            transparent: true,
+            opacity: 0.9
+        });
+        const agitationSystem = new THREE.Points(agitationGeo, agitationMat);
+        subGroup.add(agitationSystem);
+
+        // Vectores
+        function createLabelSprite(text, color) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 256; canvas.height = 128;
+            ctx.fillStyle = color;
+            ctx.font = 'bold 40px Arial';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = "black";
+            ctx.shadowBlur = 5;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            ctx.fillText(text, 128, 64);
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(4, 2, 1);
+            return sprite;
+        }
+
+        const arrowBuoyancy = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 2, 0), 5, 0x00e676);
+        subGroup.add(arrowBuoyancy);
+        const labelBuoyancy = createLabelSprite("Empuje (E)", "#00e676");
+        labelBuoyancy.position.set(0, 6, 0);
+        subGroup.add(labelBuoyancy);
+
+        const arrowWeight = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, -2, 0), 5, 0xff1744);
+        subGroup.add(arrowWeight);
+        const labelWeight = createLabelSprite("Peso (W)", "#ff1744");
+        labelWeight.position.set(0, -6, 0);
+        subGroup.add(labelWeight);
+
+        // Burbujas
+        const bubblesCount = 400; 
+        const bubblesGeo = new THREE.BufferGeometry();
+        const bubblesPos = new Float32Array(bubblesCount * 3);
+        for(let i=0; i<bubblesCount*3; i++) bubblesPos[i] = 0;
+        bubblesGeo.setAttribute('position', new THREE.BufferAttribute(bubblesPos, 3));
+        const bubblesMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.3, transparent: true, opacity: 0.9 }); 
+        const bubblesSystem = new THREE.Points(bubblesGeo, bubblesMat);
+        scene.add(bubblesSystem);
+        bubblesSystem.visible = false;
+
+        // --- FUNCIONES LÓGICAS (DEFINIDAS ANTES DEL BUCLE Y GUI) ---
+        
+        let fillIntensity = 0;
+        let currentJetIdx = 0;
+        let currentAgitIdx = 0;
+
+        // Definir funciones que serán usadas por la GUI y el loop
+        
+        function updateBallastVisuals() {
+            // Placeholder para evitar referencias circulares iniciales
+        }
+
+        // Definición del objeto de control PRIMERO
+        const controlParams = {
+            valvulaLastre: 0, 
+            emerger: function() {
+                let interval = setInterval(() => {
+                    if(controlParams.valvulaLastre > 0) {
+                        controlParams.valvulaLastre -= 2;
+                        if(controlParams.valvulaLastre < 0) controlParams.valvulaLastre = 0;
+                        
+                        // Llamada segura
+                        updateBallastVisualsReal(); 
+                        spawnBubbles(subGroup.position);
+                    } else {
+                        clearInterval(interval);
+                        bubblesSystem.visible = false;
+                    }
+                }, 20);
+            },
+            reset: function() {
+                state.depth = 0;
+                state.velocity = 0;
+                subGroup.position.y = 0;
+                controlParams.valvulaLastre = 0;
+                state.isImploded = false;
+                
+                updateBallastVisualsReal();
+                subGroup.scale.set(1,1,1); 
+            }
+        };
+
+        // Implementación real de la actualización visual
+        function updateBallastVisualsReal() {
+            const currentLevel = controlParams.valvulaLastre / 100;
+            
+            if (currentLevel > state.lastBallastLevel) {
+                fillIntensity = 0.8; 
+            } else {
+                fillIntensity = 0; 
+            }
+
+            state.ballastLevel = currentLevel;
+            state.lastBallastLevel = currentLevel;
+            
+            waterFrontMesh.scale.set(1, 1, Math.max(0.01, state.ballastLevel)); 
+            waterBackMesh.scale.set(1, 1, Math.max(0.01, state.ballastLevel));
+        }
+
+        function updateBallastEffects() {
+            const jetPositions = jetSystem.geometry.attributes.position.array;
+            const agitPositions = agitationSystem.geometry.attributes.position.array;
+            const waterLevelY = -SUB_RADIUS * 0.6 + (SUB_RADIUS * 1.2 * state.ballastLevel); 
+
+            if (fillIntensity > 0.01) {
+                fillIntensity -= 0.02; 
+                
+                let particlesToSpawn = 40; 
+                for(let i=0; i<particlesToSpawn; i++) {
+                    const idx = currentJetIdx;
+                    currentJetIdx = (currentJetIdx + 1) % jetCount;
+
+                    const isFront = Math.random() > 0.5;
+                    const zBase = isFront ? hullCylLen * 0.25 : -hullCylLen * 0.25;
+                    
+                    jetPositions[idx*3] = (Math.random() - 0.5) * 0.4; 
+                    jetPositions[idx*3+1] = SUB_RADIUS * 0.5; 
+                    jetPositions[idx*3+2] = zBase + (Math.random() - 0.5) * 0.4; 
+                    
+                    jetVel[idx] = -0.2 - Math.random() * 0.1; 
+                }
+            }
+
+            for(let i=0; i<jetCount; i++) {
+                if(jetPositions[i*3+1] > -500) { 
+                    jetVel[i] -= 0.02; 
+                    jetPositions[i*3+1] += jetVel[i];
+                    
+                    if(jetPositions[i*3+1] < waterLevelY) {
+                        const agitIdx = currentAgitIdx;
+                        currentAgitIdx = (currentAgitIdx + 1) % agitationCount;
+                        
+                        agitPositions[agitIdx*3] = jetPositions[i*3];
+                        agitPositions[agitIdx*3+1] = waterLevelY;
+                        agitPositions[agitIdx*3+2] = jetPositions[i*3+2];
+                        
+                        jetPositions[i*3+1] = -1000; 
+                    }
+                }
+            }
+
+            for(let i=0; i<agitationCount; i++) {
+                if(agitPositions[i*3+1] > -500) {
+                    agitPositions[i*3+1] += 0.02; 
+                    agitPositions[i*3] += (Math.random()-0.5)*0.05; 
+                    agitPositions[i*3+2] += (Math.random()-0.5)*0.05; 
+
+                    if(Math.random() > 0.9) agitPositions[i*3+1] = -1000;
+                }
+            }
+
+            jetSystem.geometry.attributes.position.needsUpdate = true;
+            agitationSystem.geometry.attributes.position.needsUpdate = true;
+        }
+
+        function spawnBubbles(pos) {
+            bubblesSystem.visible = true;
+            const positions = bubblesSystem.geometry.attributes.position.array;
+            for(let i=0; i < 15; i++) { 
+                const idx = Math.floor(Math.random() * bubblesCount);
+                positions[idx*3] = pos.x + (Math.random() - 0.5) * SUB_RADIUS * 2;
+                positions[idx*3 + 1] = pos.y - SUB_RADIUS; 
+                positions[idx*3 + 2] = pos.z + (Math.random() - 0.5) * SUB_RADIUS * 4;
+            }
+            bubblesSystem.geometry.attributes.position.needsUpdate = true;
+        }
+
+        function updateBubbles() {
+            if(!bubblesSystem.visible) return;
+            const positions = bubblesSystem.geometry.attributes.position.array;
+            for(let i=0; i < bubblesCount; i++) {
+                if (positions[i*3+1] > subGroup.position.y + 8) { 
+                    positions[i*3] = subGroup.position.x + (Math.random() - 0.5) * 2;
+                    positions[i*3+1] = subGroup.position.y - 1; 
+                    positions[i*3+2] = subGroup.position.z + (Math.random() - 0.5) * 8;
+                } else {
+                    positions[i*3 + 1] += 0.1; 
+                    positions[i*3] += Math.sin(positions[i*3+1]*5) * 0.02; 
+                }
+            }
+            bubblesSystem.geometry.attributes.position.needsUpdate = true;
+        }
+
+        function implodeSub() {
+            state.isImploded = true;
+            document.getElementById('disp-status').innerText = "IMPLOSIÓN ESTRUCTURAL";
+            document.getElementById('disp-status').style.color = "red";
+            
+            subGroup.scale.set(0.1, 0.1, 0.5); 
+            spawnBubbles(subGroup.position);
+            alert("El submarino ha excedido el límite de deformación elástica y ha implosionado.\n\n(Lógica basada en Valencia et al., 2025)");
+        }
+
+        function updateDashboard(mass, B, W) {
+            const depth = Math.max(0, -subGroup.position.y);
+            const pressure = 1 + (RHO_AGUA * G * depth) / P_ATM; 
+            
+            document.getElementById('disp-depth').innerText = depth.toFixed(1) + " m";
+            document.getElementById('disp-pressure').innerText = pressure.toFixed(2) + " atm";
+            
+            const volPerc = (state.hullVolume / BASE_VOLUME) * 100;
+            document.getElementById('disp-volume').innerText = volPerc.toFixed(2) + "%";
+
+            const avgDensity = mass / state.hullVolume;
+            document.getElementById('disp-density').innerText = avgDensity.toFixed(0) + " kg/m³";
+            
+            const statusEl = document.getElementById('disp-status');
+            const alertEl = document.getElementById('alert-implosion');
+
+            if (depth > 450) {
+                statusEl.innerText = "CRÍTICO";
+                statusEl.style.color = "#ff5252";
+                alertEl.style.display = "block";
+            } else {
+                alertEl.style.display = "none";
+                if (avgDensity > RHO_AGUA) {
+                    statusEl.innerText = "HUNDIÉNDOSE (W > E)";
+                    statusEl.style.color = "#ffab40";
+                } else if (avgDensity < RHO_AGUA && depth > 0.1) {
+                    statusEl.innerText = "EMERGIENDO (E > W)";
+                    statusEl.style.color = "#69f0ae";
+                } else {
+                    statusEl.innerText = "FLOTANDO / NEUTRO";
+                    statusEl.style.color = "#40c4ff";
+                }
+            }
+
+            if (depth > 550 && !state.isImploded) {
+                implodeSub();
+            }
+        }
+
+        // --- GUI Initialization ---
+        const gui = new GUI({ 
+            title: 'Panel de Control',
+            container: document.getElementById('controls-container'),
+            width: window.innerWidth < 768 ? window.innerWidth * 0.9 : 280 // Ancho dinámico
+        });
+        
+        gui.add(controlParams, 'valvulaLastre', 0, 100)
+           .name('Llenar Tanques (%)')
+           .onChange(updateBallastVisualsReal) // Referencia a la función definida
+           .listen(); 
+
+        gui.add(controlParams, 'emerger').name('⚠ EMERGENCIA (Aire)');
+        gui.add(controlParams, 'reset').name('Reiniciar');
+
+        // Toggle Logic (Ahora seguro en el DOM)
+        const dashToggle = document.getElementById('dash-toggle');
+        const dashContainer = document.getElementById('dashboard');
+        const toggleIcon = dashToggle.querySelector('.toggle-icon');
+
+        dashToggle.addEventListener('click', () => {
+            dashContainer.classList.toggle('collapsed');
+            if(dashContainer.classList.contains('collapsed')){
+                toggleIcon.innerText = '+';
+            } else {
+                toggleIcon.innerText = '−';
+            }
+        });
+
+
+        // --- BUCLE FÍSICO Y RENDER ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = Math.min(clock.getDelta(), 0.1); 
+
+            if(!state.isImploded) {
+                state.depth = -subGroup.position.y; 
+                if(state.depth < 0) state.depth = 0; 
+
+                const compressionRatio = 1 - (HULL_COMPRESSION_FACTOR * state.depth);
+                state.hullVolume = Math.max(BASE_VOLUME * compressionRatio, BASE_VOLUME * 0.5); 
+                
+                const currentHullScale = Math.cbrt(compressionRatio); 
+                mainHull.scale.set(currentHullScale, 1, currentHullScale); 
+
+                propGroup.rotation.z += state.velocity * 2; 
+
+                const massWater = MAX_BALLAST_MASS * state.ballastLevel;
+                const totalMass = BASE_MASS + massWater;
+                
+                const weightForce = totalMass * G;
+
+                let submergedRatio = 1;
+                const topY = subGroup.position.y + SUB_RADIUS;
+                const botY = subGroup.position.y - SUB_RADIUS;
+                
+                if (topY > 0 && botY < 0) {
+                    submergedRatio = Math.abs(botY) / (SUB_RADIUS * 2);
+                    submergedRatio = Math.max(0, Math.min(1, submergedRatio));
+                } else if (botY >= 0) { 
+                    submergedRatio = 0;
+                }
+
+                const buoyancyForce = RHO_AGUA * state.hullVolume * G * submergedRatio;
+
+                const dragCoeff = 2500; 
+                const dragForce = -state.velocity * dragCoeff;
+
+                const netForce = buoyancyForce - weightForce + dragForce;
+                const acceleration = netForce / totalMass;
+
+                state.velocity += acceleration * dt;
+                subGroup.position.y += state.velocity * dt;
+
+                if (subGroup.position.y > 0) { 
+                    subGroup.position.y = 0;
+                    if(state.velocity > 0) state.velocity = 0;
+                }
+
+                if (subGroup.position.y < -590) {
+                    subGroup.position.y = -590;
+                    state.velocity = 0;
+                }
+
+                // 5. Actualización Visual Vectores (Ajuste Crítico de Escala)
+                const visualScale = 0.000003; 
+                
+                const buoyLen = Math.max(2, buoyancyForce * visualScale);
+                const weightLen = Math.max(2, weightForce * visualScale);
+
+                arrowBuoyancy.setLength(buoyLen); 
+                arrowWeight.setLength(weightLen);
+                
+                labelBuoyancy.position.y = 2 + buoyLen + 1.5; 
+                labelWeight.position.y = -2 - weightLen - 1.5;
+
+                spotLight.position.copy(subGroup.position);
+                spotLight.target.position.set(subGroup.position.x, subGroup.position.y - 20, subGroup.position.z);
+                spotLight.target.updateMatrixWorld();
+
+                const targetY = Math.max(-580, Math.min(10, subGroup.position.y)); 
+                controls.target.y += (targetY - controls.target.y) * 0.1;
+                camera.position.y += (targetY + 5 - camera.position.y) * 0.1;
+
+                updateDashboard(totalMass, buoyancyForce, weightForce);
+            }
+
+            updateBubbles();
+            updateBallastEffects(); 
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        document.getElementById('loading').style.display = 'none';
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            
+            // Ajustar GUI en resize si es móvil
+            if (window.innerWidth < 768) {
+                 gui.domElement.style.width = '100%';
+            } else {
+                 gui.domElement.style.width = '280px';
+            }
+        });
+    </script>
+</body>
+</html>
