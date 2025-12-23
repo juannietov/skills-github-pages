@@ -216,7 +216,7 @@
             <h1>MECANISMO DE HUNDIMIENTO</h1>
             <div class="subtitle">Laboratorio Virtual de Física I - UTP</div>
             <div class="paper-ref">
-                Juan Nieto, Santiago Valencia, Juan Campos, Marlon Buitrago (2025)
+                Por Juan Esteban Nieto Valencia 
             </div>
         </div>
 
@@ -269,7 +269,8 @@
             ballastLevel: 0, 
             hullVolume: BASE_VOLUME,
             isImploded: false,
-            lastBallastLevel: 0
+            lastBallastLevel: 0,
+            lastPhysicsY: 0 // Nuevo: Para trackear movimiento físico real sin ruido visual
         };
 
         // --- ESCENA THREE.JS ---
@@ -279,15 +280,23 @@
 
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
         
-        // Función para ajustar cámara inicial según dispositivo
+        // Forward declaration de subGroup para usar en setInitialCamera
+        let subGroup;
+
+        // Función para ajustar cámara inicial y manejar redimensionamiento
         function setInitialCamera() {
+            // Obtener la posición Y actual del submarino (si existe) para no reiniciar la vista a la superficie
+            const currentSubY = subGroup ? subGroup.position.y : 0;
+            
             if (window.innerWidth < 768) {
                 // Móvil (Retrato): Alejar cámara para ver todo el sub
-                camera.position.set(35, 8, 10); 
+                camera.position.set(35, 8 + currentSubY, 10); 
             } else {
                 // Escritorio
-                camera.position.set(26, 6, 5);
+                camera.position.set(26, 6 + currentSubY, 5);
             }
+            // Importante: Si los controles existen, actualizar su objetivo también
+            // Nota: controls se define más abajo, esta función se llama también en resize
         }
         setInitialCamera();
 
@@ -300,6 +309,11 @@
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.target.set(0, 0, 0);
+        
+        // Ajustes de Zoom solicitados: Más fuerte, rápido y con mayor rango
+        controls.zoomSpeed = 4.0; // Velocidad de zoom mucho más alta
+        controls.minDistance = 2; // Permitir acercarse bastante sin atravesar
+        controls.maxDistance = 300; // Permitir alejarse mucho más para ver el entorno
 
         // --- ILUMINACIÓN ---
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); 
@@ -355,165 +369,167 @@
         scene.add(gridHelper);
 
         // --- CONSTRUCCIÓN DEL SUBMARINO ---
-        const subGroup = new THREE.Group();
+        // Refactorización: Corrección Geométrica de Proa (Nose Fix)
+        
+        subGroup = new THREE.Group();
         scene.add(subGroup);
 
-        const hullMat = new THREE.MeshPhysicalMaterial({
-            color: 0xd0d0d0, 
-            metalness: 0.3,
-            roughness: 0.1,
-            transmission: 0.2, 
-            thickness: 1.5,
+        // -- MATERIALES APROBADOS (NO TOCAR) --
+        // Material Standard Gris Claro Lechoso para visibilidad óptima
+        const matHull = new THREE.MeshStandardMaterial({
+            color: 0xd0d0d0,        
+            roughness: 0.5,         
+            metalness: 0.1,         
             transparent: true,
-            opacity: 0.75, 
-            side: THREE.DoubleSide,
-            clearcoat: 1.0
+            opacity: 0.4,           
+            side: THREE.DoubleSide, 
+            depthWrite: false       
         });
 
-        const steelDarkMat = new THREE.MeshStandardMaterial({ 
-            color: 0x37474f, 
-            metalness: 0.7, 
-            roughness: 0.4 
+        const matStructure = new THREE.MeshStandardMaterial({
+            color: 0x222222,        // Estructura oscura para contraste interno
+            metalness: 0.6,
+            roughness: 0.7
         });
 
-        const detailMat = new THREE.MeshStandardMaterial({
-            color: 0xcfd8dc, 
-            metalness: 0.7,
-            roughness: 0.3
+        const matDetail = new THREE.MeshStandardMaterial({
+            color: 0xff9900,        // Naranja
+            metalness: 0.3,
+            roughness: 0.4
         });
 
-        const hullCylLen = SUB_LENGTH - (SUB_RADIUS * 2); 
-        const mainHullGeo = new THREE.CylinderGeometry(SUB_RADIUS, SUB_RADIUS, hullCylLen, 32);
-        const mainHull = new THREE.Mesh(mainHullGeo, hullMat);
-        mainHull.rotation.x = Math.PI / 2; 
+        const hullLen = SUB_LENGTH - (SUB_RADIUS * 2);
+        const SEGMENTS = 48; 
+
+        // 1. CASCO CILÍNDRICO
+        const hullGeo = new THREE.CylinderGeometry(SUB_RADIUS, SUB_RADIUS, hullLen, SEGMENTS);
+        const mainHull = new THREE.Mesh(hullGeo, matHull);
+        mainHull.rotation.x = Math.PI / 2;
+        mainHull.renderOrder = 1; 
         subGroup.add(mainHull);
 
-        const ribGeo = new THREE.TorusGeometry(SUB_RADIUS * 0.95, 0.05, 16, 48);
-        const numRibs = 6;
-        for(let i=0; i<numRibs; i++) {
-            const rib = new THREE.Mesh(ribGeo, detailMat);
-            const zPos = -hullCylLen/2 + (hullCylLen / (numRibs-1)) * i;
-            rib.position.z = zPos; 
+        // 2. ESTRUCTURA INTERNA
+        const railCount = 4;
+        const railGeo = new THREE.BoxGeometry(0.15, 0.15, hullLen * 0.95);
+        for(let i=0; i<railCount; i++) {
+            const rail = new THREE.Mesh(railGeo, matStructure);
+            const angle = (Math.PI / 2) + (i * Math.PI / 2);
+            rail.position.x = Math.cos(angle) * (SUB_RADIUS * 0.9);
+            rail.position.y = Math.sin(angle) * (SUB_RADIUS * 0.9);
+            subGroup.add(rail);
+        }
+
+        const ribGeo = new THREE.TorusGeometry(SUB_RADIUS * 0.9, 0.1, 8, SEGMENTS);
+        const ribCount = 5;
+        for(let i=0; i<ribCount; i++){
+            const rib = new THREE.Mesh(ribGeo, matStructure);
+            rib.position.z = -hullLen/2 + (hullLen/(ribCount-1)) * i;
             subGroup.add(rib);
         }
 
-        const noseGeo = new THREE.SphereGeometry(SUB_RADIUS, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-        const nose = new THREE.Mesh(noseGeo, steelDarkMat);
-        nose.rotation.x = -Math.PI / 2; 
-        nose.position.z = hullCylLen / 2; 
-        subGroup.add(nose); 
-
-        const tailLen = SUB_RADIUS * 2;
-        const tailGeo = new THREE.CylinderGeometry(SUB_RADIUS, SUB_RADIUS * 0.3, tailLen, 32);
-        const tail = new THREE.Mesh(tailGeo, steelDarkMat);
-        tail.rotation.x = -Math.PI / 2; 
-        tail.position.z = -(hullCylLen / 2 + tailLen / 2); 
-        subGroup.add(tail);
-
-        const finGeo = new THREE.BoxGeometry(1.5, 0.1, 1.5);
-        const finTop = new THREE.Mesh(finGeo, steelDarkMat);
-        finTop.rotation.z = Math.PI / 2;
-        finTop.position.set(0, SUB_RADIUS, 0);
-        tail.add(finTop);
-
-        const finBot = new THREE.Mesh(finGeo, steelDarkMat);
-        finBot.rotation.z = Math.PI / 2;
-        finBot.position.set(0, -SUB_RADIUS, 0);
-        tail.add(finBot);
-
-        const finLeft = new THREE.Mesh(finGeo, steelDarkMat);
-        finLeft.position.set(SUB_RADIUS, 0, 0);
-        tail.add(finLeft);
-
-        const finRight = new THREE.Mesh(finGeo, steelDarkMat);
-        finRight.position.set(-SUB_RADIUS, 0, 0);
-        tail.add(finRight);
-
-        const sailGeo = new THREE.BoxGeometry(SUB_RADIUS * 0.8, SUB_RADIUS * 1.5, SUB_RADIUS * 1.2);
-        const sail = new THREE.Mesh(sailGeo, steelDarkMat);
-        sail.position.y = SUB_RADIUS * 0.8; 
-        sail.position.z = hullCylLen * 0.2; 
-        subGroup.add(sail);
-
-        const divePlaneGeo = new THREE.BoxGeometry(1.2, 0.1, 0.6);
-        const divePlaneLeft = new THREE.Mesh(divePlaneGeo, steelDarkMat);
-        divePlaneLeft.position.set(0.6, 0, 0);
-        sail.add(divePlaneLeft);
-        
-        const divePlaneRight = new THREE.Mesh(divePlaneGeo, steelDarkMat);
-        divePlaneRight.position.set(-0.6, 0, 0);
-        sail.add(divePlaneRight);
-
-        const periscopeGroup = new THREE.Group();
-        periscopeGroup.position.y = SUB_RADIUS * 0.75;
-        sail.add(periscopeGroup);
-
-        const mastGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.2);
-        const mast1 = new THREE.Mesh(mastGeo, detailMat);
-        mast1.position.x = 0.2;
-        periscopeGroup.add(mast1);
-        
-        const mast2 = new THREE.Mesh(mastGeo, detailMat);
-        mast2.scale.y = 0.7;
-        mast2.position.x = -0.2;
-        periscopeGroup.add(mast2);
-
-        const propGroup = new THREE.Group();
-        propGroup.position.y = -tailLen / 2; 
-        tail.add(propGroup); 
-
-        const propHubGeo = new THREE.ConeGeometry(0.15, 0.4, 16);
-        const propHub = new THREE.Mesh(propHubGeo, detailMat);
-        propHub.rotation.x = Math.PI; 
-        propGroup.add(propHub);
-
-        const bladeGeo = new THREE.BoxGeometry(0.8, 0.1, 0.15);
-        for(let i=0; i<5; i++) { 
-            const blade = new THREE.Mesh(bladeGeo, detailMat);
-            blade.rotation.y = (Math.PI * 2 / 5) * i; 
-            blade.rotateX(0.3);
-            propGroup.add(blade);
-        }
-
-        const tankVisGeo = new THREE.CylinderGeometry(SUB_RADIUS*0.6, SUB_RADIUS*0.6, hullCylLen*0.3, 16);
-        const tankShellMat = new THREE.MeshBasicMaterial({ 
-            color: 0x000000, 
-            wireframe: true, 
-            transparent: true, 
-            opacity: 0.2 
-        }); 
-        
-        const tankFrontVis = new THREE.Mesh(tankVisGeo, tankShellMat);
-        tankFrontVis.rotation.x = Math.PI / 2; 
-        tankFrontVis.position.z = hullCylLen * 0.25;
-        subGroup.add(tankFrontVis);
-
-        const tankBackVis = new THREE.Mesh(tankVisGeo, tankShellMat);
-        tankBackVis.rotation.x = Math.PI / 2;
-        tankBackVis.position.z = -hullCylLen * 0.25;
-        subGroup.add(tankBackVis);
-
-        const waterLevelGeo = new THREE.CylinderGeometry(SUB_RADIUS*0.58, SUB_RADIUS*0.58, hullCylLen*0.28, 16);
+        // --- TANQUES DE LASTRE (LÓGICA CRÍTICA) ---
+        const waterLevelGeo = new THREE.CylinderGeometry(SUB_RADIUS * 0.85, SUB_RADIUS * 0.85, hullLen * 0.4, SEGMENTS);
         const waterFillMat = new THREE.MeshBasicMaterial({ 
             color: 0x00bfff, 
-            opacity: 0.9, 
+            opacity: 0.7, 
             transparent: true,
             side: THREE.DoubleSide
         }); 
-        
+
         const waterFrontMesh = new THREE.Mesh(waterLevelGeo, waterFillMat);
         waterFrontMesh.rotation.x = Math.PI / 2; 
-        waterFrontMesh.position.z = hullCylLen * 0.25;
-        waterFrontMesh.scale.set(1, 1, 0.01); 
+        waterFrontMesh.position.z = hullLen * 0.25;
+        waterFrontMesh.scale.set(1, 1, 0.01);
         subGroup.add(waterFrontMesh);
 
         const waterBackMesh = new THREE.Mesh(waterLevelGeo, waterFillMat);
         waterBackMesh.rotation.x = Math.PI / 2;
-        waterBackMesh.position.z = -hullCylLen * 0.25;
-        waterBackMesh.scale.set(1, 1, 0.01); 
+        waterBackMesh.position.z = -hullLen * 0.25;
+        waterBackMesh.scale.set(1, 1, 0.01);
         subGroup.add(waterBackMesh);
 
-        // Jet
+        // 3. NARIZ (CORRECCIÓN DE GEOMETRÍA)
+        // Usamos SphereGeometry (hemisferio superior por defecto)
+        const noseGeo = new THREE.SphereGeometry(SUB_RADIUS, SEGMENTS, 24, 0, Math.PI * 2, 0, Math.PI / 2);
+        const nose = new THREE.Mesh(noseGeo, matHull);
+        
+        // FIX CRÍTICO: Rotación positiva (Math.PI / 2) para que el polo Y (ahora Z) apunte hacia adelante (+Z)
+        nose.rotation.x = Math.PI / 2; 
+        
+        nose.position.z = (hullLen / 2) - 0.05; // Mantenemos el solapamiento para ocultar la unión
+        nose.renderOrder = 1;
+        subGroup.add(nose); 
+
+        // Escotilla frontal (Detalle sólido)
+        const hatchGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.2, 16);
+        const hatch = new THREE.Mesh(hatchGeo, matStructure);
+        hatch.rotation.x = Math.PI / 2;
+        hatch.position.z = hullLen / 2 + SUB_RADIUS - 0.2;
+        subGroup.add(hatch);
+
+        // 4. COLA
+        const tailLen = SUB_RADIUS * 1.5;
+        // CylinderGeometry(RadioTop, RadioBottom...) -> Top es Y+, Bottom es Y-
+        const tailGeo = new THREE.CylinderGeometry(SUB_RADIUS, 0.5, tailLen, SEGMENTS);
+        const tail = new THREE.Mesh(tailGeo, matStructure);
+        
+        // FIX SECUNDARIO: Rotación positiva para que la parte ancha (Top) apunte hacia el casco (+Z relativo) 
+        // y la parte estrecha hacia atrás (-Z relativo).
+        tail.rotation.x = Math.PI / 2; 
+        
+        tail.position.z = -(hullLen / 2 + tailLen / 2) + 0.05; 
+        subGroup.add(tail);
+
+        // 5. PROPULSIÓN
+        const propGroup = new THREE.Group();
+        propGroup.position.set(0, 0, -(hullLen/2 + tailLen));
+        subGroup.add(propGroup);
+
+        const hubGeo = new THREE.SphereGeometry(0.3, 16, 16);
+        const propHub = new THREE.Mesh(hubGeo, matDetail);
+        propGroup.add(propHub);
+
+        const bladeGeo = new THREE.BoxGeometry(0.1, 1.2, 0.2);
+        for(let i=0; i<3; i++) { 
+            const blade = new THREE.Mesh(bladeGeo, matDetail);
+            blade.rotation.z = (Math.PI * 2 / 3) * i; 
+            blade.position.z = 0.2;
+            blade.rotation.x = 0.2;
+            propHub.add(blade);
+        }
+
+        const tailFinGeo = new THREE.BoxGeometry(0.1, 2.0, 1.5);
+        for(let i=0; i<4; i++){
+            const fin = new THREE.Mesh(tailFinGeo, matStructure);
+            fin.rotation.z = (Math.PI/4) + (Math.PI/2 * i);
+            fin.position.z = -tailLen * 0.5;
+            const tip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 1.52), matDetail);
+            tip.position.y = 0.9;
+            fin.add(tip);
+            tail.add(fin);
+        }
+
+        // 6. VELA
+        const sailGroup = new THREE.Group();
+        sailGroup.position.set(0, SUB_RADIUS * 0.8, hullLen * 0.2);
+        subGroup.add(sailGroup);
+
+        const sailGeo = new THREE.BoxGeometry(1.5, 2.0, 2.5);
+        const sail = new THREE.Mesh(sailGeo, matStructure);
+        sail.position.y = 0.5;
+        const sPos = sailGeo.attributes.position;
+        for(let i=0; i<sPos.count; i++){
+            if(sPos.getY(i) > 0) sPos.setX(i, sPos.getX(i) * 0.5);
+            if(sPos.getZ(i) > 0) sPos.setZ(i, sPos.getZ(i) * 0.6);
+        }
+        sailGeo.computeVertexNormals();
+        sailGroup.add(sail);
+
+        const peri = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.5), matDetail);
+        peri.position.set(0, 1.5, 0);
+        sailGroup.add(peri);
+
+        // 7. SISTEMAS DE PARTÍCULAS
         const jetCount = 2000;
         const jetGeo = new THREE.BufferGeometry();
         const jetPos = new Float32Array(jetCount * 3);
@@ -532,7 +548,6 @@
         const jetSystem = new THREE.Points(jetGeo, jetMat);
         subGroup.add(jetSystem);
 
-        // Agitación
         const agitationCount = 1000;
         const agitationGeo = new THREE.BufferGeometry();
         const agitationPos = new Float32Array(agitationCount * 3);
@@ -548,7 +563,17 @@
         const agitationSystem = new THREE.Points(agitationGeo, agitationMat);
         subGroup.add(agitationSystem);
 
-        // Vectores
+        const bubblesCount = 400; 
+        const bubblesGeo = new THREE.BufferGeometry();
+        const bubblesPos = new Float32Array(bubblesCount * 3);
+        for(let i=0; i<bubblesCount*3; i++) bubblesPos[i] = 0;
+        bubblesGeo.setAttribute('position', new THREE.BufferAttribute(bubblesPos, 3));
+        const bubblesMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.3, transparent: true, opacity: 0.9 }); 
+        const bubblesSystem = new THREE.Points(bubblesGeo, bubblesMat);
+        scene.add(bubblesSystem);
+        bubblesSystem.visible = false;
+
+        // 8. VECTORES DE FUERZA (UI 3D)
         function createLabelSprite(text, color) {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -579,17 +604,6 @@
         const labelWeight = createLabelSprite("Peso (W)", "#ff1744");
         labelWeight.position.set(0, -6, 0);
         subGroup.add(labelWeight);
-
-        // Burbujas
-        const bubblesCount = 400; 
-        const bubblesGeo = new THREE.BufferGeometry();
-        const bubblesPos = new Float32Array(bubblesCount * 3);
-        for(let i=0; i<bubblesCount*3; i++) bubblesPos[i] = 0;
-        bubblesGeo.setAttribute('position', new THREE.BufferAttribute(bubblesPos, 3));
-        const bubblesMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.3, transparent: true, opacity: 0.9 }); 
-        const bubblesSystem = new THREE.Points(bubblesGeo, bubblesMat);
-        scene.add(bubblesSystem);
-        bubblesSystem.visible = false;
 
         // --- FUNCIONES LÓGICAS (DEFINIDAS ANTES DEL BUCLE Y GUI) ---
         
@@ -630,6 +644,15 @@
                 
                 updateBallastVisualsReal();
                 subGroup.scale.set(1,1,1); 
+
+                // Reiniciar la cámara a la superficie
+                if (window.innerWidth < 768) {
+                    camera.position.set(35, 8, 10); 
+                } else {
+                    camera.position.set(26, 6, 5);
+                }
+                controls.target.set(0, 0, 0);
+                controls.update();
             }
         };
 
@@ -664,7 +687,7 @@
                     currentJetIdx = (currentJetIdx + 1) % jetCount;
 
                     const isFront = Math.random() > 0.5;
-                    const zBase = isFront ? hullCylLen * 0.25 : -hullCylLen * 0.25;
+                    const zBase = isFront ? hullLen * 0.25 : -hullLen * 0.25; // Use new hullLen
                     
                     jetPositions[idx*3] = (Math.random() - 0.5) * 0.4; 
                     jetPositions[idx*3+1] = SUB_RADIUS * 0.5; 
@@ -696,6 +719,7 @@
                 if(agitPositions[i*3+1] > -500) {
                     agitPositions[i*3+1] += 0.02; 
                     agitPositions[i*3] += (Math.random()-0.5)*0.05; 
+                    // Corrección aquí: usar 'i' en lugar de 'agitIdx'
                     agitPositions[i*3+2] += (Math.random()-0.5)*0.05; 
 
                     if(Math.random() > 0.9) agitPositions[i*3+1] = -1000;
@@ -711,210 +735,260 @@
             const positions = bubblesSystem.geometry.attributes.position.array;
             for(let i=0; i < 15; i++) { 
                 const idx = Math.floor(Math.random() * bubblesCount);
-                positions[idx*3] = pos.x + (Math.random() - 0.5) * SUB_RADIUS * 2;
-                positions[idx*3 + 1] = pos.y - SUB_RADIUS; 
-                positions[idx*3 + 2] = pos.z + (Math.random() - 0.5) * SUB_RADIUS * 4;
+                positions[idx*3] = pos.x + (Math.random()-0.5)*2;
+                positions[idx*3+1] = pos.y;
+                positions[idx*3+2] = pos.z + (Math.random()-0.5)*8;
             }
             bubblesSystem.geometry.attributes.position.needsUpdate = true;
         }
 
-        function updateBubbles() {
+        function animateBubbles() {
             if(!bubblesSystem.visible) return;
             const positions = bubblesSystem.geometry.attributes.position.array;
             for(let i=0; i < bubblesCount; i++) {
-                if (positions[i*3+1] > subGroup.position.y + 8) { 
-                    positions[i*3] = subGroup.position.x + (Math.random() - 0.5) * 2;
-                    positions[i*3+1] = subGroup.position.y - 1; 
-                    positions[i*3+2] = subGroup.position.z + (Math.random() - 0.5) * 8;
-                } else {
-                    positions[i*3 + 1] += 0.1; 
-                    positions[i*3] += Math.sin(positions[i*3+1]*5) * 0.02; 
+                if(positions[i*3+1] > state.depth + 10) { 
+                    positions[i*3+1] = -1000; 
+                } else if(positions[i*3+1] > -500) {
+                    positions[i*3+1] += 0.1 + Math.random() * 0.1;
+                    positions[i*3] += Math.sin(positions[i*3+1]*0.5) * 0.05;
                 }
             }
             bubblesSystem.geometry.attributes.position.needsUpdate = true;
         }
 
-        function implodeSub() {
-            state.isImploded = true;
-            document.getElementById('disp-status').innerText = "IMPLOSIÓN ESTRUCTURAL";
-            document.getElementById('disp-status').style.color = "red";
-            
-            subGroup.scale.set(0.1, 0.1, 0.5); 
-            spawnBubbles(subGroup.position);
-            alert("El submarino ha excedido el límite de deformación elástica y ha implosionado.\n\n(Lógica basada en Valencia et al., 2025)");
-        }
-
-        function updateDashboard(mass, B, W) {
-            const depth = Math.max(0, -subGroup.position.y);
-            const pressure = 1 + (RHO_AGUA * G * depth) / P_ATM; 
-            
-            document.getElementById('disp-depth').innerText = depth.toFixed(1) + " m";
-            document.getElementById('disp-pressure').innerText = pressure.toFixed(2) + " atm";
-            
-            const volPerc = (state.hullVolume / BASE_VOLUME) * 100;
-            document.getElementById('disp-volume').innerText = volPerc.toFixed(2) + "%";
-
-            const avgDensity = mass / state.hullVolume;
-            document.getElementById('disp-density').innerText = avgDensity.toFixed(0) + " kg/m³";
-            
-            const statusEl = document.getElementById('disp-status');
-            const alertEl = document.getElementById('alert-implosion');
-
-            if (depth > 450) {
-                statusEl.innerText = "CRÍTICO";
-                statusEl.style.color = "#ff5252";
-                alertEl.style.display = "block";
-            } else {
-                alertEl.style.display = "none";
-                if (avgDensity > RHO_AGUA) {
-                    statusEl.innerText = "HUNDIÉNDOSE (W > E)";
-                    statusEl.style.color = "#ffab40";
-                } else if (avgDensity < RHO_AGUA && depth > 0.1) {
-                    statusEl.innerText = "EMERGIENDO (E > W)";
-                    statusEl.style.color = "#69f0ae";
-                } else {
-                    statusEl.innerText = "FLOTANDO / NEUTRO";
-                    statusEl.style.color = "#40c4ff";
-                }
-            }
-
-            if (depth > 550 && !state.isImploded) {
-                implodeSub();
-            }
-        }
-
-        // --- GUI Initialization ---
-        const gui = new GUI({ 
-            title: 'Panel de Control',
-            container: document.getElementById('controls-container'),
-            width: window.innerWidth < 768 ? window.innerWidth * 0.9 : 280 // Ancho dinámico
-        });
+        // --- GUI CONFIG ---
+        const gui = new GUI({ container: document.getElementById('controls-container'), width: 300 });
+        gui.title("PANEL DE CONTROL");
         
-        gui.add(controlParams, 'valvulaLastre', 0, 100)
-           .name('Llenar Tanques (%)')
-           .onChange(updateBallastVisualsReal) // Referencia a la función definida
-           .listen(); 
+        gui.add(controlParams, 'valvulaLastre', 0, 100).name('Válvula Lastre (%)').listen().onChange(updateBallastVisualsReal);
+        
+        const actionsFolder = gui.addFolder('Acciones de Emergencia');
+        actionsFolder.add(controlParams, 'emerger').name('EXPULSAR LASTRE');
+        actionsFolder.add(controlParams, 'reset').name('REINICIAR SISTEMA');
+        actionsFolder.open();
 
-        gui.add(controlParams, 'emerger').name('⚠ EMERGENCIA (Aire)');
-        gui.add(controlParams, 'reset').name('Reiniciar');
-
-        // Toggle Logic (Ahora seguro en el DOM)
+        // --- DASHBOARD LOGIC ---
         const dashToggle = document.getElementById('dash-toggle');
-        const dashContainer = document.getElementById('dashboard');
-        const toggleIcon = dashToggle.querySelector('.toggle-icon');
-
+        const dashboard = document.getElementById('dashboard');
+        const toggleIcon = document.querySelector('.toggle-icon');
+        
         dashToggle.addEventListener('click', () => {
-            dashContainer.classList.toggle('collapsed');
-            if(dashContainer.classList.contains('collapsed')){
-                toggleIcon.innerText = '+';
+            dashboard.classList.toggle('collapsed');
+            if(dashboard.classList.contains('collapsed')) {
+                toggleIcon.textContent = '+';
             } else {
-                toggleIcon.innerText = '−';
+                toggleIcon.textContent = '−';
             }
         });
 
+        const dispDepth = document.getElementById('disp-depth');
+        const dispPressure = document.getElementById('disp-pressure');
+        const dispVolume = document.getElementById('disp-volume');
+        const dispDensity = document.getElementById('disp-density');
+        const dispStatus = document.getElementById('disp-status');
+        const alertBox = document.getElementById('alert-implosion');
 
-        // --- BUCLE FÍSICO Y RENDER ---
-        const clock = new THREE.Clock();
+        // --- SISTEMA DE PARTÍCULAS DE FRICCIÓN (Hull Turbulence) ---
+        // Visualización de micro-burbujas/suciedad agitada por el casco
+        let hullTurbulenceSystem;
+        const turbulenceCount = 80;
+        const turbulenceVel = new Float32Array(turbulenceCount); // Velocidad individual
 
+        function createHullTurbulence() {
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(turbulenceCount * 3);
+            
+            for(let i=0; i<turbulenceCount; i++) {
+                // Distribución cilíndrica alrededor del casco (que está alineado en Z)
+                const angle = Math.random() * Math.PI * 2;
+                // Radio ligeramente mayor al del submarino para que floten alrededor
+                const radius = SUB_RADIUS * 1.2 + (Math.random() * 0.5);
+                const z = (Math.random() - 0.5) * SUB_LENGTH; // A lo largo del casco
+                
+                // En el espacio local de subGroup, el casco va a lo largo de Z.
+                // X e Y forman la sección transversal.
+                pos[i*3] = Math.cos(angle) * radius;     // X
+                pos[i*3+1] = Math.sin(angle) * radius;   // Y (Arriba local)
+                pos[i*3+2] = z;                          // Z
+                
+                turbulenceVel[i] = 0.005 + Math.random() * 0.01; // Flotación lenta
+            }
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            
+            const mat = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.08,
+                transparent: true,
+                opacity: 0.3,
+                sizeAttenuation: true,
+                depthWrite: false // Para que no bloqueen otras transparencias
+            });
+            
+            hullTurbulenceSystem = new THREE.Points(geo, mat);
+            subGroup.add(hullTurbulenceSystem); // Se mueve con el submarino
+        }
+
+        createHullTurbulence();
+
+        // --- PHYSICS LOOP ---
+        function updatePhysics() {
+            if(state.isImploded) return;
+
+            // 1. Calcular Masa Total
+            const ballastMass = (state.ballastLevel) * MAX_BALLAST_MASS;
+            const totalMass = BASE_MASS + ballastMass;
+
+            // 2. Calcular Volumen Actual (Compresión del casco)
+            const pressure = P_ATM + RHO_AGUA * G * Math.abs(state.depth);
+            const pressureDiff = Math.max(0, pressure - P_ATM);
+            
+            // Reducción de volumen por presión
+            const volumeReduction = BASE_VOLUME * pressureDiff * HULL_COMPRESSION_FACTOR / 1e6; 
+            state.hullVolume = Math.max(BASE_VOLUME * 0.5, BASE_VOLUME - volumeReduction);
+
+            // 3. Fuerzas
+            const weight = totalMass * G; 
+            const buoyancy = state.hullVolume * RHO_AGUA * G; 
+            const netForce = weight - buoyancy; 
+
+            // Drag (Resistencia del agua)
+            const dragCoeff = 850; 
+            const dragForce = -Math.sign(state.velocity) * dragCoeff * state.velocity * state.velocity;
+
+            const totalForceY = -netForce + dragForce; 
+            
+            // F = ma
+            const acceleration = totalForceY / totalMass;
+
+            state.velocity += acceleration * 0.016; // dt ~ 60fps
+            state.depth += -state.velocity * 0.016; 
+
+            // Límites de profundidad
+            if (state.depth < 0) {
+                state.depth = 0;
+                state.velocity = 0;
+            } else if (state.depth > 600) {
+                state.velocity = 0;
+                state.depth = 600;
+            }
+
+            // --- ACTUALIZACIÓN DE POSICIÓN FÍSICA Y CÁMARA (DESACOPLADA) ---
+            // 1. Calculamos la posición física "pura" del submarino
+            const currentPhysicsY = -state.depth;
+            
+            // 2. Movemos la cámara SOLO basándonos en el cambio de profundidad física
+            // Esto ignora cualquier "bobbing" visual que añadamos después
+            const cameraDelta = currentPhysicsY - state.lastPhysicsY;
+            camera.position.y += cameraDelta;
+            controls.target.y = currentPhysicsY; // El target siempre es el centro físico
+            
+            // 3. Actualizamos la posición base del grupo (se sobreescribirá visualmente en animate si hay bobbing)
+            subGroup.position.y = currentPhysicsY;
+            
+            // 4. Guardamos el estado para el siguiente frame
+            state.lastPhysicsY = currentPhysicsY;
+
+            // Colapso / Implosión
+            if (pressureDiff > 55 * 101325) { 
+                state.isImploded = true;
+                subGroup.scale.set(0.2, 1, 0.2); 
+                alertBox.innerHTML = "¡FALLO CATASTRÓFICO DEL CASCO!";
+                alertBox.style.display = "block";
+            } else if (pressureDiff > 45 * 101325) {
+                alertBox.style.display = "block";
+            } else {
+                alertBox.style.display = "none";
+            }
+
+            // Actualizar Vectores
+            const forceScale = 0.00005;
+            arrowBuoyancy.setLength(buoyancy * forceScale);
+            arrowWeight.setLength(weight * forceScale);
+            
+            labelBuoyancy.position.y = (buoyancy * forceScale) + 2;
+            labelWeight.position.y = -(weight * forceScale) - 2;
+
+            // Update UI
+            dispDepth.textContent = state.depth.toFixed(1) + " m";
+            dispPressure.textContent = (pressure / 101325).toFixed(2) + " atm";
+            
+            const volPct = (state.hullVolume / BASE_VOLUME) * 100;
+            dispVolume.textContent = volPct.toFixed(1) + "%";
+            
+            const currentDensity = totalMass / state.hullVolume;
+            dispDensity.textContent = currentDensity.toFixed(0) + " kg/m³";
+
+            if(state.isImploded) dispStatus.textContent = "DESTRUIDO";
+            else if(state.velocity < -0.1) { dispStatus.textContent = "EMERGIENDO"; dispStatus.style.color = "#00e676"; }
+            else if(state.velocity > 0.1) { dispStatus.textContent = "HUNDIENDO"; dispStatus.style.color = "#ff1744"; }
+            else { dispStatus.textContent = "ESTABLE"; dispStatus.style.color = "#ffeb3b"; }
+        }
+
+        // --- MAIN LOOP ---
         function animate() {
             requestAnimationFrame(animate);
 
-            const dt = Math.min(clock.getDelta(), 0.1); 
+            const time = Date.now() * 0.001; 
 
-            if(!state.isImploded) {
-                state.depth = -subGroup.position.y; 
-                if(state.depth < 0) state.depth = 0; 
+            // 1. Calcular Física Base (Y mover cámara)
+            updatePhysics();
 
-                const compressionRatio = 1 - (HULL_COMPRESSION_FACTOR * state.depth);
-                state.hullVolume = Math.max(BASE_VOLUME * compressionRatio, BASE_VOLUME * 0.5); 
+            // 2. Efecto VFX: Rebote Hidrodinámico "Poquito" (Variable Bounce)
+            // Se aplica DESPUÉS de updatePhysics para que sea puramente visual y no mueva la cámara
+            if (!state.isImploded) {
+                // Limpiar rotaciones anteriores
+                subGroup.rotation.set(0, 0, 0);
+                subGroup.position.x = 0;
+                subGroup.position.z = 0;
+
+                // Desplazamiento vertical visual suave (Marea)
+                // Math.sin(time * 2.0) * 0.1 -> Frecuencia moderada, amplitud baja (10cm)
+                const hydrodynamicBounce = Math.sin(time * 2.0) * 0.1;
                 
-                const currentHullScale = Math.cbrt(compressionRatio); 
-                mainHull.scale.set(currentHullScale, 1, currentHullScale); 
-
-                propGroup.rotation.z += state.velocity * 2; 
-
-                const massWater = MAX_BALLAST_MASS * state.ballastLevel;
-                const totalMass = BASE_MASS + massWater;
-                
-                const weightForce = totalMass * G;
-
-                let submergedRatio = 1;
-                const topY = subGroup.position.y + SUB_RADIUS;
-                const botY = subGroup.position.y - SUB_RADIUS;
-                
-                if (topY > 0 && botY < 0) {
-                    submergedRatio = Math.abs(botY) / (SUB_RADIUS * 2);
-                    submergedRatio = Math.max(0, Math.min(1, submergedRatio));
-                } else if (botY >= 0) { 
-                    submergedRatio = 0;
-                }
-
-                const buoyancyForce = RHO_AGUA * state.hullVolume * G * submergedRatio;
-
-                const dragCoeff = 2500; 
-                const dragForce = -state.velocity * dragCoeff;
-
-                const netForce = buoyancyForce - weightForce + dragForce;
-                const acceleration = netForce / totalMass;
-
-                state.velocity += acceleration * dt;
-                subGroup.position.y += state.velocity * dt;
-
-                if (subGroup.position.y > 0) { 
-                    subGroup.position.y = 0;
-                    if(state.velocity > 0) state.velocity = 0;
-                }
-
-                if (subGroup.position.y < -590) {
-                    subGroup.position.y = -590;
-                    state.velocity = 0;
-                }
-
-                // 5. Actualización Visual Vectores (Ajuste Crítico de Escala)
-                const visualScale = 0.000003; 
-                
-                const buoyLen = Math.max(2, buoyancyForce * visualScale);
-                const weightLen = Math.max(2, weightForce * visualScale);
-
-                arrowBuoyancy.setLength(buoyLen); 
-                arrowWeight.setLength(weightLen);
-                
-                labelBuoyancy.position.y = 2 + buoyLen + 1.5; 
-                labelWeight.position.y = -2 - weightLen - 1.5;
-
-                spotLight.position.copy(subGroup.position);
-                spotLight.target.position.set(subGroup.position.x, subGroup.position.y - 20, subGroup.position.z);
-                spotLight.target.updateMatrixWorld();
-
-                const targetY = Math.max(-580, Math.min(10, subGroup.position.y)); 
-                controls.target.y += (targetY - controls.target.y) * 0.1;
-                camera.position.y += (targetY + 5 - camera.position.y) * 0.1;
-
-                updateDashboard(totalMass, buoyancyForce, weightForce);
+                // Sumamos a la posición física actual
+                subGroup.position.y += hydrodynamicBounce;
             }
 
-            updateBubbles();
-            updateBallastEffects(); 
+            // 3. Animación de Turbulencia del Casco
+            if (hullTurbulenceSystem) {
+                const positions = hullTurbulenceSystem.geometry.attributes.position.array;
+                
+                for(let i = 0; i < turbulenceCount; i++) {
+                    positions[i*3+1] += turbulenceVel[i];
+                    positions[i*3] += (Math.random() - 0.5) * 0.005;
+                    positions[i*3+2] += (Math.random() - 0.5) * 0.005;
+
+                    if (positions[i*3+1] > SUB_RADIUS * 1.5) {
+                        positions[i*3+1] = -SUB_RADIUS * 1.5;
+                        const angle = Math.random() * Math.PI * 2;
+                        const radius = SUB_RADIUS * 1.2 + (Math.random() * 0.5);
+                        positions[i*3] = Math.cos(angle) * radius;
+                        positions[i*3+2] = (Math.random() - 0.5) * SUB_LENGTH;
+                    }
+                }
+                hullTurbulenceSystem.geometry.attributes.position.needsUpdate = true;
+            }
+
+            updateBallastEffects();
+            animateBubbles();
+            
             controls.update();
             renderer.render(scene, camera);
         }
 
+        // Remover pantalla de carga
         document.getElementById('loading').style.display = 'none';
 
         animate();
 
+        // Handle Resize
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            
-            // Ajustar GUI en resize si es móvil
-            if (window.innerWidth < 768) {
-                 gui.domElement.style.width = '100%';
-            } else {
-                 gui.domElement.style.width = '280px';
-            }
+            setInitialCamera();
         });
+
     </script>
 </body>
 </html>
