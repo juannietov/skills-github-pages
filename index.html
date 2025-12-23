@@ -919,8 +919,8 @@
             dispDensity.textContent = currentDensity.toFixed(0) + " kg/m³";
 
             if(state.isImploded) dispStatus.textContent = "DESTRUIDO";
-            else if(state.velocity < -0.1) { dispStatus.textContent = "EMERGIENDO"; dispStatus.style.color = "#00e676"; }
-            else if(state.velocity > 0.1) { dispStatus.textContent = "HUNDIENDO"; dispStatus.style.color = "#ff1744"; }
+            else if(state.velocity < -0.1) { dispStatus.textContent = "HUNDIENDO"; dispStatus.style.color = "#ff1744"; }
+            else if(state.velocity > 0.1) { dispStatus.textContent =  "EMERGIENDO"; dispStatus.style.color = "#00e676"; }
             else { dispStatus.textContent = "ESTABLE"; dispStatus.style.color = "#ffeb3b"; }
         }
 
